@@ -22,6 +22,10 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include "sc-pkcs11.h"
 
@@ -50,6 +54,29 @@ static sc_pkcs11_mechanism_type_t find_mechanism = {
 	NULL,		/* mech_data */
 	NULL,		/* free_mech_data */
 };
+
+static pid_t
+show_message()
+{
+	pid_t pid = fork();
+	if (pid == 0) {
+		// Wait 10ms just in case the smartcard doesn't need any action.
+		usleep(100000);
+		execlp("xmessage", "xmessage", "Waiting for smartcard to sign. You may need to push a button", NULL);
+                _exit(1);
+	}
+	return pid;
+}
+
+static void
+kill_message(pid_t pid)
+{
+	if (pid < 0) {
+		return;
+	}
+	kill(pid, SIGTERM);
+	waitpid(pid, NULL, 0);
+}
 
 static void
 sc_find_release(sc_pkcs11_operation_t *operation)
@@ -692,8 +719,11 @@ C_Sign(CK_SESSION_HANDLE hSession,		/* the session's handle */
 	rv = sc_pkcs11_sign_update(session, pData, ulDataLen);
 	if (rv == CKR_OK) {
 		rv = restore_login_state(session->slot);
-		if (rv == CKR_OK)
+		if (rv == CKR_OK) {
+			pid_t pid = show_message();
 			rv = sc_pkcs11_sign_final(session, pSignature, pulSignatureLen);
+			kill_message(pid);
+		}
 		rv = reset_login_state(session->slot, rv);
 	}
 
